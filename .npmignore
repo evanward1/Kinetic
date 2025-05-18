@@ -1,0 +1,6 @@
+src/
+tests/
+.github/
+*.log
+tsconfig*.json
+Dockerfile
