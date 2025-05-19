@@ -1,20 +1,29 @@
 {
   "name": "kinetic-solana-cli",
   "version": "1.0.0",
+  "description": "CLI tool to fetch the first deployment timestamp of a Solana program",
   "main": "dist/index.js",
+  "bin": {
+    "kinetic-solana-cli": "./dist/index.js"
+  },
   "scripts": {
     "prebuild": "rimraf dist",
     "build": "tsc",
-    "start": "ts-node src/index.ts"
+    "start": "ts-node src/index.ts",
+    "test": "mocha -r ts-node/register tests/**/*.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.74.0",
     "yargs": "^17.7.2"
   },
   "devDependencies": {
+    "@types/chai": "^4.3.20",
+    "@types/mocha": "^10.0.10",
     "@types/yargs": "^17.0.24",
+    "chai": "^4.5.0",
+    "mocha": "^10.8.2",
     "rimraf": "^5.0.0",
-    "ts-node": "^10.9.1",
-    "typescript": "^5.1.6"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
   }
 }
