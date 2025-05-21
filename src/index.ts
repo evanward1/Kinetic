@@ -10,7 +10,8 @@ import {
 } from '@solana/web3.js';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { AppConfig, config, getRetryDelay } from './config';
+// Updated import to include getEffectiveRpcEndpoints
+import { AppConfig, config, getRetryDelay, getEffectiveRpcEndpoints } from './config';
 import logger from './logger';
 import {
   NoSignaturesFoundError,
@@ -26,7 +27,6 @@ interface CliArgs {
   verbose: boolean;
   endpoint?: string;
 }
-
 
 // Helper function for retrying async operations
 async function retryOperation<T>(
@@ -47,8 +47,6 @@ async function retryOperation<T>(
       } else {
         logger.error(`Error during ${operationName} on attempt ${attempt + 1}: ${e.message || String(e)}`);
         if (attempt === retryConfig.attempts - 1) {
-          // If it's the last attempt, throw a more specific error
-          // Preserve original error message if possible, even for non-Error objects
           const originalErrorMessage = (typeof e === 'object' && e !== null && 'message' in e) ? String(e.message) : String(e);
           const errorToWrap = e instanceof Error ? e : new Error(originalErrorMessage);
           throw new RpcMaxRetriesError(operationName, errorToWrap);
@@ -59,13 +57,10 @@ async function retryOperation<T>(
       }
     }
   }
-  // If loop finishes, all retries failed.
-  // Preserve original error message if possible for the RpcMaxRetriesError
   const finalErrorMessage = (typeof lastError === 'object' && lastError !== null && 'message' in lastError) ? String(lastError.message) : String(lastError);
   const errorToWrapForFinalThrow = lastError instanceof Error ? lastError : new Error(finalErrorMessage);
   throw new RpcMaxRetriesError(operationName, errorToWrapForFinalThrow);
 }
-
 
 // Exported for testing
 export async function findFirstSignature(
@@ -183,9 +178,10 @@ async function main() {
 
   logger.initialize(argv.verbose);
 
-  const { programId, endpoint } = argv;
+  // Renamed endpoint from yargs to cliEndpoint for clarity
+  const { programId, endpoint: cliEndpoint } = argv; 
 
-  logger.log('CLI started with options:', { programId, verbose: argv.verbose, endpoint: endpoint || '(default list will be used)' });
+  logger.log('CLI started with options:', { programId, verbose: argv.verbose, endpoint: cliEndpoint || '(effective list will be used)' });
 
   const pubkey = (() => {
     try {
@@ -195,7 +191,11 @@ async function main() {
     }
   })();
 
-  const endpointsToTry = endpoint ? [endpoint] : config.defaultRpcEndpoints;
+  // Use getEffectiveRpcEndpoints to determine the list of URLs to try
+  const endpointsToTry = getEffectiveRpcEndpoints(cliEndpoint);
+  logger.log('Effective RPC endpoints to try:', endpointsToTry);
+
+
   let overallLastError: Error | null = null;
 
   for (const url of endpointsToTry) {
@@ -234,7 +234,7 @@ async function main() {
   } else {
     logger.error("No specific error message from last attempt, check logs if verbose mode was on.");
   }
-  process.exit(1);
+  process.exit(1); 
 }
 
 if (require.main === module) {
@@ -244,7 +244,8 @@ if (require.main === module) {
     } else {
         console.error(`[FATAL] An unexpected error occurred: ${err.message || String(err)}`);
     }
-    if (process.env.NODE_ENV === 'development' && err.stack) {
+    // Optionally show stack in dev, but be careful in production
+    if (process.env.NODE_ENV === 'development' && err.stack) { 
         console.error(err.stack);
     }
     process.exit(1);
