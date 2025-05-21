@@ -227,6 +227,3 @@ A GitHub Actions workflow (`.github/workflows/docker-publish.yml`) is also inclu
 ## License
 
 MIT
-
-```
-```
