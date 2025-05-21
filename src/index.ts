@@ -4,7 +4,9 @@ import {
   Connection,
   PublicKey,
   ConfirmedSignatureInfo,
-  VersionedTransactionResponse
+  VersionedTransactionResponse,
+  GetTransactionConfig,
+  SignaturesForAddressOptions,
 } from '@solana/web3.js';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -15,7 +17,8 @@ interface Args {
   endpoint?: string;
 }
 
-async function findFirstSignature(
+// Exported for testing
+export async function findFirstSignature(
   connection: Connection,
   programPubkey: PublicKey,
   verbose: boolean
@@ -24,64 +27,68 @@ async function findFirstSignature(
   let before: string | undefined = undefined;
   let earliestSig: string | undefined = undefined;
   let foundAllSignatures = false;
+  let lastRpcError: any = null; // To store the last error from RPC
 
   if (verbose) console.log(`[LOG] Starting to fetch signatures for ${programPubkey.toBase58()} with limit ${limit}`);
 
-  // This loop paginates backwards through the transaction history.
-  // It continues as long as the API returns a full batch of `limit` signatures,
-  // implying there might be older ones.
   while (!foundAllSignatures) {
     let sigInfos: ConfirmedSignatureInfo[] = [];
     if (verbose) console.log(`[LOG] Fetching signatures before: ${before || 'most recent'}`);
+    lastRpcError = null; // Reset for this batch attempt
 
     for (let attempt = 0; attempt < 5; attempt++) { // Retry mechanism
       try {
-        sigInfos = await connection.getSignaturesForAddress(programPubkey, { before, limit });
+        const options: SignaturesForAddressOptions = { limit };
+        if (before) {
+          options.before = before;
+        }
+        sigInfos = await connection.getSignaturesForAddress(programPubkey, options);
         if (verbose) console.log(`[LOG] Fetched ${sigInfos.length} signature infos.`);
+        lastRpcError = null; // Clear error on success
         break; // Success
       } catch (e: any) {
+        lastRpcError = e; // Store the caught error
         if (e?.message?.includes('429')) { // Rate limit
           const delay = 500 * Math.pow(2, attempt);
           if (verbose) console.warn(`[WARN] Rate limit hit on getSignaturesForAddress. Retrying in ${delay}ms... (Attempt ${attempt + 1}/5)`);
           await new Promise(res => setTimeout(res, delay));
         } else {
           if (verbose) console.error(`[ERROR] Failed to fetch signatures on attempt ${attempt + 1}: ${e.message}`);
-          if (attempt === 4) throw e; // Re-throw on last attempt
+          if (attempt === 4) throw e; // Re-throw on last attempt if not a 429
         }
       }
     }
 
+    // If after retries, sigInfos is still empty AND there was an RPC error (like 429 for all retries)
+    if (sigInfos.length === 0 && lastRpcError) {
+        throw lastRpcError; // Re-throw the actual RPC error
+    }
+
     if (sigInfos.length === 0) {
-      // If `before` is defined and we get 0 signatures, it means we've reached the end of known history for that specific `before` signature,
-      // or the program truly has no transactions if `before` was undefined initially.
-      // If `earliestSig` is already set, we've found the oldest batch in a previous iteration.
-      if (earliestSig) {
-         foundAllSignatures = true; // We've already stored the earliest from a previous successful fetch
-      } else {
-        // This means no signatures were found at all for the program.
+      if (earliestSig) { // If we had found signatures in a previous batch, this means we're done.
+         foundAllSignatures = true;
+      } else { // No signatures ever found for this program.
         throw new Error('No signatures found for this program. Signature fetch might have failed or the program has no transactions.');
       }
       break;
     }
 
-    // The API returns signatures from newest to oldest.
-    // The last one in the array is the oldest in *this batch*.
     earliestSig = sigInfos[sigInfos.length - 1].signature;
 
     if (sigInfos.length < limit) {
-      // If fewer signatures than the limit are returned, we've reached the oldest ones.
       foundAllSignatures = true;
       if (verbose) console.log(`[LOG] Reached end of signature history, earliest in this batch: ${earliestSig}`);
     } else {
-      // If we got a full batch, set `before` to the oldest signature in this batch
-      // to get the next older batch in the next iteration.
       before = earliestSig;
       if (verbose) console.log(`[LOG] Continuing pagination, next 'before' will be: ${before}`);
     }
   }
 
   if (!earliestSig) {
-    // This case should ideally be caught by the sigInfos.length === 0 check inside the loop.
+    // This condition is hit if the loop finishes without setting earliestSig.
+    // If lastRpcError is present, it means all attempts for the first batch failed.
+    if (lastRpcError) throw lastRpcError;
+    // Otherwise, it's the generic "no signatures found" which might occur if loop exited due to `foundAllSignatures = true` but `earliestSig` was somehow not set (should be rare).
     throw new Error('No signatures found for this program after pagination attempts.');
   }
 
@@ -89,33 +96,43 @@ async function findFirstSignature(
   return earliestSig;
 }
 
-async function fetchBlockTime(
+// Exported for testing
+export async function fetchBlockTime(
   connection: Connection,
   signature: string,
   verbose: boolean
 ): Promise<number> {
   let tx: VersionedTransactionResponse | null = null;
+  let lastRpcError: any = null; // To store the last error from RPC
+
   if (verbose) console.log(`[LOG] Fetching transaction details for signature: ${signature}`);
 
   for (let attempt = 0; attempt < 5; attempt++) { // Retry mechanism
     try {
-      tx = await connection.getTransaction(signature, {
+      const config: GetTransactionConfig = {
         commitment: 'confirmed',
-        maxSupportedTransactionVersion: 0 // Important for modern transactions
-      });
+      };
+      tx = await connection.getTransaction(signature, config);
       if (verbose && tx) console.log(`[LOG] Transaction details fetched. BlockTime: ${tx.blockTime}`);
       else if (verbose && !tx) console.log(`[LOG] Transaction not found or null response for signature: ${signature} on attempt ${attempt + 1}`);
+      lastRpcError = null; // Clear error on success
       break; // Success
     } catch (e: any) {
+      lastRpcError = e; // Store the caught error
       if (e?.message?.includes('429')) { // Rate limit
         const delay = 500 * Math.pow(2, attempt);
         if (verbose) console.warn(`[WARN] Rate limit hit on getTransaction. Retrying in ${delay}ms... (Attempt ${attempt + 1}/5)`);
         await new Promise(res => setTimeout(res, delay));
       } else {
         if (verbose) console.error(`[ERROR] Failed to fetch transaction on attempt ${attempt + 1}: ${e.message}`);
-        if (attempt === 4) throw e; // Re-throw on last attempt
+        if (attempt === 4) throw e; // Re-throw on last attempt if not a 429
       }
     }
+  }
+
+  // If after retries, tx is still null AND there was an RPC error (like 429 for all retries)
+  if (!tx && lastRpcError) {
+    throw lastRpcError; // Re-throw the actual RPC error
   }
 
   if (!tx) {
@@ -129,6 +146,7 @@ async function fetchBlockTime(
   return tx.blockTime;
 }
 
+// Main CLI execution logic
 async function main() {
   const argv = yargs(hideBin(process.argv))
     .usage('Usage: $0 <programId> [--verbose] [--endpoint url]')
@@ -136,7 +154,7 @@ async function main() {
     .positional('programId', {
       describe: 'Solana program ID to query',
       type: 'string',
-      demandOption: true // Makes this argument required
+      demandOption: true
     })
     .option('verbose', {
       alias: 'v',
@@ -149,10 +167,10 @@ async function main() {
       type: 'string',
       description: 'Specify a custom Solana RPC endpoint URL.'
     })
-    .strict() // Report errors for unknown options
-    .help() // Enable --help
+    .strict()
+    .help()
     .alias('help', 'h')
-    .wrap(yargs(hideBin(process.argv)).terminalWidth()) // Responsive help text
+    .wrap(yargs(hideBin(process.argv)).terminalWidth())
     .parseSync() as unknown as Args;
 
   const { programId, verbose, endpoint } = argv;
@@ -175,15 +193,12 @@ async function main() {
 
   const defaultEndpoints = [
     process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-    'https://solana-api.projectserum.com', // Maintained by Serum community
-    'https://api.rpcpool.com', // Another public option
-    // Add more public endpoints here if desired, or from Helius as suggested in prompt
-    // 'https://rpc.helius.xyz/?api-key=<YOUR_API_KEY>' // Example for Helius
+    'https://solana-api.projectserum.com',
+    'https://api.rpcpool.com',
   ];
 
   const endpointsToTry = endpoint ? [endpoint] : defaultEndpoints;
-
-  let lastError: Error | null = null;
+  let overallLastError: Error | null = null;
 
   for (const url of endpointsToTry) {
     if (verbose) console.log(`[LOG] Attempting to use RPC endpoint: ${url}`);
@@ -193,31 +208,28 @@ async function main() {
       const sig = await findFirstSignature(connection, pubkey, verbose);
       const blockTime = await fetchBlockTime(connection, sig, verbose);
       const deploymentDate = new Date(blockTime * 1000).toISOString();
-      console.log(deploymentDate); // Final output
-      process.exit(0); // Success
+      console.log(deploymentDate);
+      process.exit(0);
     } catch (err: any) {
-      lastError = err;
+      overallLastError = err;
       if (verbose) {
         console.error(`[ERROR] Endpoint ${url} failed: ${err.message}`);
-        // console.error(err.stack); // Optionally log stack for more debug info
       }
-      // Continue to the next endpoint if one fails
     }
   }
 
   console.error(`[ERROR] All configured RPC endpoints failed to retrieve the deployment timestamp.`);
-  if (lastError) {
-    console.error(`[ERROR] Last error encountered: ${lastError.message}`);
-    // if (verbose && lastError.stack) console.error(lastError.stack);
+  if (overallLastError) {
+    console.error(`[ERROR] Last error encountered: ${overallLastError.message}`);
   } else {
     console.error("[ERROR] No specific error message from last attempt, check logs if verbose mode was on.");
   }
-  process.exit(1); // Failure
+  process.exit(1);
 }
 
-main().catch(err => {
-  // This catch is for unexpected errors not handled within main's loop or specific functions.
-  console.error(`[FATAL_ERROR] An unexpected error occurred: ${err.message}`);
-  // if (err.stack) console.error(err.stack);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(err => {
+    console.error(`[FATAL_ERROR] An unexpected error occurred: ${err.message}`);
+    process.exit(1);
+  });
+}
