@@ -1,6 +1,3 @@
-Okay, here is the raw Markdown content from the immersive document `solana_cli_readme_full_markdown_v1`. You can copy this and paste it directly into your `README.md` file:
-
-````markdown
 # Kinetic Solana Program Timestamp CLI
 
 A command-line tool to fetch the first deployment timestamp of a Solana program. This tool is built with TypeScript, emphasizing robustness, configurability, and best practices for interacting with the Solana blockchain.
@@ -50,7 +47,7 @@ Execute the CLI from the project root after building:
 
 ```bash
 node dist/index.js <PROGRAM_ID> [options]
-````
+```
 
 Or, using the `npm start` script (which uses `ts-node` for development):
 
