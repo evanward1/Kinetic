@@ -40,21 +40,14 @@ async function retryOperation<T>(
       return await operationFn();
     } catch (e: any) {
       lastError = e;
+      const delay = getRetryDelay(attempt, retryConfig.initialDelayMs, retryConfig.maxDelayMs);
       if (e?.message?.includes('429')) {
-        const delay = getRetryDelay(attempt, retryConfig.initialDelayMs, retryConfig.maxDelayMs);
         logger.warn(`Rate limit hit on ${operationName}. Retrying in ${delay}ms... (Attempt ${attempt + 1}/${retryConfig.attempts})`);
-        await new Promise(res => setTimeout(res, delay));
       } else {
         logger.error(`Error during ${operationName} on attempt ${attempt + 1}: ${e.message || String(e)}`);
-        if (attempt === retryConfig.attempts - 1) {
-          const originalErrorMessage = (typeof e === 'object' && e !== null && 'message' in e) ? String(e.message) : String(e);
-          const errorToWrap = e instanceof Error ? e : new Error(originalErrorMessage);
-          throw new RpcMaxRetriesError(operationName, errorToWrap);
-        }
-        const delay = getRetryDelay(attempt, retryConfig.initialDelayMs, retryConfig.maxDelayMs);
         logger.warn(`Retrying ${operationName} after error in ${delay}ms... (Attempt ${attempt + 1}/${retryConfig.attempts})`);
-        await new Promise(res => setTimeout(res, delay));
       }
+      await new Promise(res => setTimeout(res, delay));
     }
   }
   const finalErrorMessage = (typeof lastError === 'object' && lastError !== null && 'message' in lastError) ? String(lastError.message) : String(lastError);
