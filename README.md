@@ -84,7 +84,7 @@ npm start -- <PROGRAM_ID> [options]
   * **Get timestamp for the Memo Program using a specific custom endpoint:**
 
     ```bash
-    npm start -- Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo -e [https://api.mainnet-beta.solana.com](https://api.mainnet-beta.solana.com)
+    npm start -- Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo -e https://api.mainnet-beta.solana.com
     ```
 
   * **Using a Helius RPC endpoint via environment variable:**
