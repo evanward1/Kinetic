@@ -71,7 +71,13 @@ describe('Mock Connection Tests (Refactored)', () => {
 
     it('should find the earliest signature with pagination', async () => {
       const batch1Limit = appConfig.signatureFetchLimit;
-      const batch1 = Array.from({ length: batch1Limit }, (_, i) => createMockSigInfo(`sig_batch1_${batch1Limit - 1 - i}`, 2000 + batch1Limit - 1 - i));
+      const batch1 = Array.from({ length: batch1Limit }, (_, i) =>
+        createMockSigInfo(
+          `sig_batch1_${batch1Limit - 1 - i}`,
+          2000 + batch1Limit - 1 - i
+        )
+      );
+      const lastSigFirstBatch = batch1[batch1.length - 1].signature;
       const batch2 = [
         createMockSigInfo('sig_batch2_3', 1200),
         createMockSigInfo('sig_batch2_2', 1100),
@@ -79,12 +85,20 @@ describe('Mock Connection Tests (Refactored)', () => {
       ];
 
       mockConnection.getSignaturesForAddress
-        .onFirstCall().resolves(batch1)
-        .onSecondCall().resolves(batch2);
+        .onFirstCall()
+        .resolves(batch1)
+        .onSecondCall()
+        .resolves(batch2);
 
       const earliest = await findFirstSignature(mockConnection, programPubkey);
       expect(earliest).to.equal('sig_batch2_1');
       expect(mockConnection.getSignaturesForAddress.calledTwice).to.be.true;
+      expect(
+        mockConnection.getSignaturesForAddress.secondCall.calledWith(
+          programPubkey,
+          { limit: appConfig.signatureFetchLimit, before: lastSigFirstBatch }
+        )
+      ).to.be.true;
     });
 
     it('should throw NoSignaturesFoundError if no signatures are found', async () => {
