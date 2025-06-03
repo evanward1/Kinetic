@@ -92,11 +92,11 @@ export async function findFirstSignature(
 
     if (sigInfos.length === 0) {
       if (earliestSig) {
-         foundAllSignatures = true;
+        foundAllSignatures = true;
+        break;
       } else {
         throw new NoSignaturesFoundError(programPubkey.toBase58());
       }
-      break;
     }
 
     earliestSig = sigInfos[sigInfos.length - 1].signature;
